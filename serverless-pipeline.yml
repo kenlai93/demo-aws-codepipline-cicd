@@ -1,0 +1,316 @@
+service: demo-aws-codepipline-cicd
+
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  stage: ${opt:stage, "sandbox"}
+  region: ${env:REGION}
+  stackName: ${sls:stage}-${env:APP_NAME}-pipeline
+  deploymentBucket:
+    name: ${sls:stage}-${env:APP_NAME}-pipeline-deployment
+
+resources:
+  Parameters:
+    stage:
+      Type: String
+      Description: The environment name used like sandbox, dev, prod.
+      Default: ${sls:stage}
+      AllowedValues:
+        - sandbox
+        - prod
+    appName:
+      Type: String
+      Description: The app name
+      Default: ${env:APP_NAME}
+
+  Resources:
+    PipelineRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub "${stage}-${appName}-codepipeline-role"
+        AssumeRolePolicyDocument:
+          Statement:
+            - Action: ["sts:AssumeRole"]
+              Effect: Allow
+              Principal:
+                Service: [codepipeline.amazonaws.com]
+          Version: "2012-10-17"
+        Path: /
+        Policies:
+          - PolicyName: !Sub "${appName}-pipeline-cloudformation-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "cloudformation:CreateStack"
+                    - "cloudformation:DescribeStacks"
+                    - "cloudformation:UpdateStack"
+                    - "cloudformation:CreateChangeSet"
+                    - "cloudformation:ExecuteChangeSet"
+                    - "cloudformation:DeleteChangeSet"
+                    - "cloudformation:DescribeChangeSet"
+                    - "cloudformation:SetStackPolicy"
+                  Resource:
+                    - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${stage}-${appName}*"
+          - PolicyName: !Sub "${appName}-pipeline-sns-publish-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "sns:Publish"
+                  Resource: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${stage}-${appName}*"
+          - PolicyName: !Sub "${appName}-pipeline-s3-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "s3:*"
+                  Resource:
+                    - !Sub "arn:aws:s3:::${stage}-${appName}-pipeline-deployment*"
+          - PolicyName: !Sub "${appName}-pipeline-codeStar-connection-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "codestar-connections:GetHost"
+                    - "codestar-connections:UseConnection"
+                    - "codestar-connections:GetConnection"
+                  Resource:
+                    - !Sub "arn:aws:codestar-connections:*:${AWS::AccountId}:host/*"
+                    - !Sub "arn:aws:codestar-connections:*:${AWS::AccountId}:connection/*"
+          - PolicyName: !Sub "${appName}-pipeline-codeBuild-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "codebuild:CreateReport"
+                    - "codebuild:StartBuildBatch"
+                    - "codebuild:StartBuild"
+                    - "codebuild:BatchGetBuilds"
+                  Resource:
+                    - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/*"
+                    - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/*"
+
+    # CodeBuild role
+    CodeBuildRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub "${stage}-${appName}-codebuild-role"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - codebuild.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        Path: /
+        Policies:
+          - PolicyName: !Sub "${appName}-codeBuild-cloudformation-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "cloudformation:*"
+                  Resource:
+                    "*"
+                    # - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:*/${stage}-${appName}*"
+          - PolicyName: !Sub "${appName}-codeBuild-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "codebuild:*"
+                  Resource:
+                    - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${stage}-${appName}*"
+          - PolicyName: !Sub "${appName}-codeBuild-logs-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:PutLogEvents"
+                    - "logs:PutLogEvents"
+                    - "logs:DescribeLogGroups"
+                    - "logs:DeleteLogGroup"
+                    - "logs:DescribeDestinations"
+                    - "logs:PutDestination"
+                    - "logs:DeleteDestination"
+                    - "logs:PutDestinationPolicy"
+                    - "logs:PutSubscriptionFilter"
+                    - "logs:DeleteSubscriptionFilter"
+                  Resource: "*"
+          - PolicyName: !Sub "${appName}-codeBuild-s3-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "s3:*"
+                  Resource:
+                    - !Sub "arn:aws:s3:::${stage}-${appName}-pipeline-deployment*"
+          - PolicyName: !Sub "${appName}-codeBuild-secrets-manager-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "secretsmanager:*"
+                  Resource: "*"
+          - PolicyName: !Sub "${appName}-codeBuild-lambda-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:*
+                  Resource:
+                    "*"
+                    # - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${stage}-${appName}*"
+          - PolicyName: !Sub "${appName}-codeBuild-iam-policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - iam:*
+                  Resource:
+                    "*"
+                    # - !Sub "arn:aws:iam::${AWS::AccountId}:role/${stage}-${appName}*"
+
+    NotificationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: !Sub "${stage}-${appName}-notification-queue"
+
+    NotificationQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Service:
+                  - sns.amazonaws.com
+              Action:
+                - sqs:SendMessage
+                - sqs:SendMessageBatch
+              Resource: !GetAtt NotificationQueue.Arn
+        Queues:
+          - !Ref NotificationQueue
+
+    NotificationTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: !Sub "${stage}-${appName}-notification-sns"
+
+    NotificationTopicLambdaSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: !Ref NotificationTopic
+        Endpoint: !GetAtt NotificationQueue.Arn
+        Protocol: sqs
+        RawMessageDelivery: true
+
+    # CodeBuild Project
+    CodeBuildProject:
+      Type: AWS::CodeBuild::Project
+      Properties:
+        Name: !Sub "${stage}-${appName}-codebuild"
+        Description: "CI/CD source code build project"
+        Artifacts:
+          Packaging: zip
+          Type: codepipeline
+        Environment:
+          ComputeType: BUILD_GENERAL1_MEDIUM
+          Image: aws/codebuild/standard:5.0
+          Type: LINUX_CONTAINER
+          EnvironmentVariables:
+            - Name: ENV
+              Type: PLAINTEXT
+              Value: !Sub "${stage}"
+            - Name: APP_NAME
+              Type: PLAINTEXT
+              Value: !Sub "${appName}"
+        ServiceRole: !Ref CodeBuildRole
+        Source:
+          Type: CODEPIPELINE
+          BuildSpec: CodeBuild/buildspec.yaml
+        Cache:
+          Type: LOCAL
+          Modes:
+            - LOCAL_CUSTOM_CACHE
+
+    # CodePipeline Project
+    CodePipelineProject:
+      Type: AWS::CodePipeline::Pipeline
+      Properties:
+        ArtifactStore:
+          Location: !Sub "${stage}-${appName}-pipeline-deployment"
+          Type: S3
+        Name: !Sub "${stage}-${appName}-codepipeline"
+        RoleArn: !GetAtt PipelineRole.Arn
+        Stages:
+          - Name: Source
+            Actions:
+              - Name: ApplicationSource
+                ActionTypeId:
+                  Category: Source
+                  Owner: AWS
+                  Provider: CodeStarSourceConnection
+                  Version: 1
+                Configuration:
+                  ConnectionArn: !Sub "arn:aws:codestar-connections:${AWS::Region}:${AWS::AccountId}:connection/${env:CONNECTION_ID}"
+                  FullRepositoryId: !Sub "${env:REPOSITORY_ID}"
+                  BranchName: !Sub "${env:CICD_BRANCH}"
+                  OutputArtifactFormat: "CODE_ZIP"
+                OutputArtifacts:
+                  - Name: Source
+                RunOrder: 1
+                InputArtifacts: []
+          - Name: Approval
+            Actions:
+              - Name: ApplicationApproval
+                ActionTypeId:
+                  Category: Approval
+                  Owner: AWS
+                  Provider: Manual
+                  Version: 1
+                Configuration:
+                  CustomData: "Comments on the manual approval"
+                  ExternalEntityLink: "http://my-url.com"
+                  NotificationArn: !Ref NotificationTopic
+                OutputArtifacts: []
+                RunOrder: 1
+          - Name: Build
+            Actions:
+              - Name: ApplicationBuild
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Provider: CodeBuild
+                  Version: 1
+                Configuration:
+                  ProjectName: !Ref CodeBuildProject
+                InputArtifacts:
+                  - Name: Source
+                OutputArtifacts: []
+                RunOrder: 1
+  Outputs:
+    NotificationQueueArn:
+      Value: !GetAtt NotificationQueue.Arn
+      Export:
+        Name: ${sls:stage}-${env:APP_NAME}-notification-queue

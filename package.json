@@ -1,0 +1,20 @@
+{
+  "name": "demo-aws-codepipline-cicd",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "deploy:pipeline": "sls deploy --config serverless-pipeline.yml",
+    "deploy:function": "sls deploy --config serverless-function.yml",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "serverless": "^3.21.0",
+    "serverless-dotenv-plugin": "^4.0.1"
+  },
+  "dependencies": {
+    "axios": "^0.27.2"
+  }
+}

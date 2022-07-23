@@ -1,0 +1,23 @@
+version: 0.2
+
+phases:
+  install:
+    ## Install necessary software
+    runtime-versions:
+      nodejs: 14
+    commands:
+      - npm ci
+  pre_build:
+    commands:
+  build:
+    on-failure: ABORT
+    commands:
+      ## Build project source
+      - npm run deploy:function -- --stage $ENV
+  post_build:
+    commands:
+      - echo 'post_build'
+
+cache:
+  paths:
+    - "node_modules/**/*"

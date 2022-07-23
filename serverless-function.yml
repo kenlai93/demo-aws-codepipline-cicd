@@ -1,0 +1,49 @@
+service: demo-aws-codepipeline-cicd-function
+
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  stage: ${opt:stage, "sandbox"}
+  region: ${env:REGION}
+  memorySize: 128
+  timeout: 3
+  stackName: ${sls:stage}-${env:APP_NAME}-function
+  deploymentBucket:
+    name: ${sls:stage}-${env:APP_NAME}-pipeline-deployment
+
+custom:
+  notificationQueueArn: !ImportValue ${sls:stage}-${env:APP_NAME}-notification-queue
+
+functions:
+  DemoFunction:
+    name: ${sls:stage}-${env:APP_NAME}-function-demo-function
+    handler: ./src/functions/demoFunction/index.handler
+    description: function description
+    runtime: nodejs14.x
+    memorySize: 128
+    timeout: 3
+    environment:
+      AAA: aaa
+
+  PipelineNotifier:
+    name: ${sls:stage}-${env:APP_NAME}-function-pipeline-notifier
+    handler: ./src/functions/pipelineNotifier/index.handler
+    description: function description
+    runtime: nodejs14.x
+    memorySize: 128
+    timeout: 3
+    environment:
+      TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
+    events:
+      - sqs:
+          arn: ${self:custom.notificationQueueArn}
+
+resources:
+  Resources:
+    FunctionSecret:
+      Type: AWS::SecretsManager::Secret
+      Properties:
+        Name: ${sls:stage}-${env:APP_NAME}-function-secret
+        SecretString: ${file(./.secret.js):demoSecret}
