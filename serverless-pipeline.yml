@@ -313,4 +313,4 @@ resources:
     NotificationQueueArn:
       Value: !GetAtt NotificationQueue.Arn
       Export:
-        Name: ${sls:stage}-${env:APP_NAME}-notification-queue
+        Name: ${stage}-${appName}-notification-queue
